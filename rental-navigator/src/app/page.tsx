@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { 
   Scale, MapPin, Building, ChevronRight, AlertCircle, 
   Loader2, ArrowRight, ShieldCheck, HelpCircle, FileText, 
-  X, ExternalLink, CalendarClock, Activity
+  X, ExternalLink, CalendarClock, Activity, Star
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { DEMO_EXAMPLES, DemoExample } from '@/data/demoExamples';
 
 export default function Home() {
   // State
@@ -22,17 +23,112 @@ export default function Home() {
   const [targetDate, setTargetDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [timelineMode, setTimelineMode] = useState(false);
   const [timelineData, setTimelineData] = useState<any>(null);
+  const [demoCategoryFilter, setDemoCategoryFilter] = useState('All');
 
-  const SUGGESTED_QUESTIONS = [
-    "Can my landlord raise my rent?",
-    "Is this property subject to rent control?",
-    "How much can my landlord charge as a security deposit?",
-    "How much notice is required before eviction?",
-    "Can my landlord enter without notice?"
-  ];
+  // Chat & Viewer State
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatTone, setChatTone] = useState('Normal');
+  const [chatHistory, setChatHistory] = useState<{role: string, content: string}[]>([]);
+  const [currentChatInput, setCurrentChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [sourceHealth, setSourceHealth] = useState<boolean | null>(null);
+
+  const CATEGORIES = ['All', 'Rent', 'Deposits', 'Tenant Rights', 'Future Laws', 'Edge Cases'];
+  const filteredDemos = DEMO_EXAMPLES.filter(d => demoCategoryFilter === 'All' || d.category === demoCategoryFilter);
+  const featuredDemo = DEMO_EXAMPLES.find(d => d.isFeatured);
+
+  const getSuggestedQuestions = () => {
+    // Dynamically pull questions from demo examples based on the current address's city/state
+    if (!jurisdictionData) return [];
+    const locationString = jurisdictionData.formatted_address || '';
+    const relevant = DEMO_EXAMPLES.filter(d => locationString.includes(d.address.split(',')[0]));
+    if (relevant.length > 0) return relevant.slice(0, 5).map(r => r.question);
+    
+    // Fallback defaults
+    return [
+      "Can my landlord raise my rent?",
+      "How much can my landlord charge as a security deposit?",
+      "How much notice is required before eviction?",
+      "Can my landlord enter without notice?",
+      "What rental rules change next year?"
+    ];
+  };
+
+  const handleRunDemo = (demo: DemoExample) => {
+    setAddress(demo.address);
+    setQuestion(demo.question);
+    // Sequence: set state, then immediately trigger geocode which will then wait for user to hit Ask, OR automate the whole flow.
+    // The requirement says: "Clicking the button should automatically populate the address and question and take the user into the normal application flow."
+    handleGeocode(undefined, demo.address, demo.question);
+  };
+
+  const fetchUrlHealth = async (url: string) => {
+    setSourceHealth(null);
+    try {
+      const res = await fetch('/api/health-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      setSourceHealth(data.ok);
+    } catch {
+      setSourceHealth(false);
+    }
+  };
+
+  const handleChatSubmit = async (e: React.FormEvent, presetMsg?: string) => {
+    e.preventDefault();
+    const msg = presetMsg || currentChatInput;
+    if (!msg.trim() || isChatLoading) return;
+
+    setCurrentChatInput('');
+    const newHistory = [...chatHistory, { role: 'user', content: msg }];
+    setChatHistory(newHistory);
+    setIsChatLoading(true);
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address,
+          jurisdictions: jurisdictionData?.jurisdictions,
+          date: targetDate,
+          question,
+          answer: answerData,
+          evidence: rawEvidence,
+          history: newHistory.slice(0, -1), // Everything before current msg
+          tone: chatTone,
+          newMessage: msg
+        })
+      });
+      
+      if (!res.body) throw new Error('No stream available');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      
+      setChatHistory(prev => [...prev, { role: 'assistant', content: '' }]);
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        setChatHistory(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1].content += chunk;
+          return updated;
+        });
+      }
+    } catch (err: any) {
+      setChatHistory(prev => [...prev, { role: 'assistant', content: 'An error occurred while generating the response.' }]);
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
 
   // 1. Resolve Address
-  const handleGeocode = async (e?: React.FormEvent, presetAddr?: string) => {
+  const handleGeocode = async (e?: React.FormEvent, presetAddr?: string, autoAskQuestion?: string) => {
     if (e) e.preventDefault();
     const addr = presetAddr || address;
     if (!addr.trim()) return;
@@ -55,6 +151,12 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to resolve address');
       setJurisdictionData(data);
+      
+      // If triggered from a demo card, automatically kick off the question phase
+      if (autoAskQuestion) {
+          handleAsk(undefined, autoAskQuestion, undefined, data);
+      }
+
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -63,15 +165,19 @@ export default function Home() {
   };
 
   // 2. Get Answer
-  const handleAsk = async (e?: React.FormEvent, presetQ?: string, date?: string) => {
+  const handleAsk = async (e?: React.FormEvent, presetQ?: string, date?: string, presetJurisData?: any) => {
     if (e) e.preventDefault();
     const q = presetQ || question;
-    if (!q || !jurisdictionData) return;
+    const jd = presetJurisData || jurisdictionData;
+    
+    if (!q || !jd) return;
 
     setIsLoading(prev => ({ ...prev, answer: true }));
     setError(null);
     setAnswerData(null);
     setTimelineMode(false);
+    setChatHistory([]);
+    setIsChatOpen(false);
 
     if (presetQ) setQuestion(presetQ);
 
@@ -192,15 +298,81 @@ export default function Home() {
               </button>
             </form>
 
-            <div className="pt-8">
-              <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Try Demo Mode</p>
-              <div className="flex flex-wrap justify-center gap-3">
-                <button onClick={() => handleGeocode(undefined, "123 Main St, San Francisco, CA")} className="px-6 py-3 bg-blue-600 text-white rounded-full font-medium hover:bg-blue-700 transition shadow-md flex items-center gap-2">
-                  <Building className="w-4 h-4" /> Try San Francisco Demo
-                </button>
-                <button onClick={() => handleGeocode(undefined, "Apple Park, Cupertino")} className="px-6 py-3 bg-white border border-gray-200 rounded-full font-medium hover:border-blue-300 hover:bg-blue-50 transition text-gray-700 shadow-sm flex items-center gap-2">
-                  <Building className="w-4 h-4 text-gray-400" /> Try Cupertino Demo
-                </button>
+            <div className="pt-16 w-full text-left">
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">Explore Example Cases</h3>
+              <p className="text-gray-500 mb-8">Select a pre-built example to see how the system handles different legal scenarios.</p>
+              
+              {/* Featured Demo */}
+              {featuredDemo && (
+                <div className="mb-10 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-2xl p-6 shadow-sm hover:shadow-md transition">
+                  <div className="flex items-center gap-2 text-blue-700 font-bold uppercase tracking-widest text-xs mb-3">
+                    <Star className="w-4 h-4" /> Recommended Hackathon Demo
+                  </div>
+                  <h4 className="text-xl font-bold text-gray-900 mb-2">{featuredDemo.title}</h4>
+                  <p className="text-sm text-gray-600 mb-4">{featuredDemo.description}</p>
+                  <div className="flex flex-col md:flex-row gap-4 mb-6">
+                    <div className="flex items-center gap-2 text-sm text-gray-700 bg-white px-3 py-1.5 rounded-lg border border-blue-100">
+                      <MapPin className="w-4 h-4 text-blue-500" /> {featuredDemo.address.split(',').slice(1).join(',')}
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-gray-700 bg-white px-3 py-1.5 rounded-lg border border-blue-100">
+                      <HelpCircle className="w-4 h-4 text-blue-500" /> "{featuredDemo.question}"
+                    </div>
+                  </div>
+                  <button onClick={() => handleRunDemo(featuredDemo)} className="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition shadow-sm flex items-center justify-center gap-2">
+                    Run Full Demo Pipeline <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Filters */}
+              <div className="flex flex-wrap gap-2 mb-6">
+                {CATEGORIES.map(cat => (
+                  <button 
+                    key={cat}
+                    onClick={() => setDemoCategoryFilter(cat)}
+                    className={`px-4 py-2 rounded-full text-sm font-medium transition ${
+                      demoCategoryFilter === cat 
+                        ? 'bg-gray-900 text-white shadow-sm' 
+                        : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              {/* Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredDemos.filter(d => !d.isFeatured).map(demo => (
+                  <div key={demo.id} className="bg-white border border-gray-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-md transition flex flex-col">
+                    <div className="flex items-start justify-between mb-3">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                        {demo.category}
+                      </span>
+                      {demo.category === 'Future Laws' && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600 bg-purple-50 px-2 py-1 rounded">Time-Aware</span>
+                      )}
+                    </div>
+                    <h4 className="font-bold text-gray-900 mb-1 leading-tight">{demo.title}</h4>
+                    <p className="text-xs text-gray-500 mb-4 line-clamp-2">{demo.description}</p>
+                    
+                    <div className="mt-auto space-y-2 mb-4">
+                      <p className="text-[11px] text-gray-600 flex items-center gap-1.5">
+                        <MapPin className="w-3 h-3 text-gray-400 shrink-0" /> <span className="truncate">{demo.address}</span>
+                      </p>
+                      <p className="text-[11px] text-gray-600 flex items-start gap-1.5 font-medium">
+                        <HelpCircle className="w-3 h-3 text-gray-400 shrink-0 mt-0.5" /> <span className="line-clamp-2">"{demo.question}"</span>
+                      </p>
+                    </div>
+
+                    <button 
+                      onClick={() => handleRunDemo(demo)}
+                      className="w-full py-2 bg-gray-50 border border-gray-200 text-sm font-semibold rounded-lg text-gray-700 hover:bg-blue-600 hover:text-white hover:border-blue-600 transition"
+                    >
+                      Try Example
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -277,9 +449,9 @@ export default function Home() {
 
                 {!answerData && !isLoading.answer && (
                     <div>
-                        <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Suggested questions</p>
+                        <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Questions you can ask</p>
                         <div className="flex flex-col gap-2">
-                            {SUGGESTED_QUESTIONS.map((q, i) => (
+                            {getSuggestedQuestions().map((q, i) => (
                                 <button 
                                     key={i}
                                     onClick={() => handleAsk(undefined, q)}
@@ -391,6 +563,17 @@ export default function Home() {
                                 <p className="text-sm text-gray-600">{answerData.limitations}</p>
                             </div>
                         )}
+                    </div>
+                    
+                    {/* Ask Follow-ups Button */}
+                    <div className="mt-8 pt-6 border-t border-gray-100 flex justify-center">
+                        <button 
+                            onClick={() => setIsChatOpen(true)}
+                            className="flex items-center gap-2 px-6 py-3 bg-blue-50 text-blue-700 font-semibold rounded-xl hover:bg-blue-100 transition"
+                        >
+                            <HelpCircle className="w-5 h-5" />
+                            Ask follow-ups about this result
+                        </button>
                     </div>
 
                   </div>
@@ -528,22 +711,124 @@ export default function Home() {
                     
                     <div>
                         <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Relevant Legal Passage</h4>
-                        <div className="bg-amber-50/50 border-l-4 border-amber-300 p-5 text-gray-800 font-serif leading-relaxed text-[15px] rounded-r-xl">
-                            {selectedEvidence.relevantText}
+                        <div className="bg-amber-50/50 border-l-4 border-amber-300 p-5 text-gray-800 font-serif leading-relaxed text-[15px] rounded-r-xl max-h-[400px] overflow-y-auto whitespace-pre-wrap">
+                            {selectedEvidence.snapshot_text ? (
+                                (() => {
+                                    const text = selectedEvidence.snapshot_text;
+                                    const snippet = selectedEvidence.relevantText;
+                                    const idx = text.indexOf(snippet);
+                                    if (idx === -1) return text;
+                                    return (
+                                        <>
+                                            {text.substring(0, idx)}
+                                            <mark className="bg-yellow-200">{snippet}</mark>
+                                            {text.substring(idx + snippet.length)}
+                                        </>
+                                    );
+                                })()
+                            ) : (
+                                selectedEvidence.relevantText
+                            )}
                         </div>
                     </div>
                     
-                    <a 
-                        href={selectedEvidence.sourceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer" 
-                        className="flex items-center justify-center gap-2 w-full py-4 px-4 border-2 border-gray-200 text-sm font-bold uppercase tracking-widest rounded-xl text-gray-600 hover:border-gray-900 hover:text-gray-900 hover:bg-gray-50 transition"
-                    >
-                        View Official Document <ExternalLink className="h-4 w-4" />
-                    </a>
+                    <div className="space-y-3">
+                        <a 
+                            href={selectedEvidence.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer" 
+                            onClick={() => fetchUrlHealth(selectedEvidence.sourceUrl)}
+                            className="flex items-center justify-center gap-2 w-full py-4 px-4 border-2 border-gray-200 text-sm font-bold uppercase tracking-widest rounded-xl text-gray-600 hover:border-gray-900 hover:text-gray-900 hover:bg-gray-50 transition"
+                        >
+                            Open Original Source <ExternalLink className="h-4 w-4" />
+                        </a>
+                        {sourceHealth === false && (
+                            <p className="text-xs text-amber-600 text-center font-medium bg-amber-50 p-2 rounded">
+                                The authoritative source is currently unavailable. Showing the saved copy retrieved on {selectedEvidence.retrieved_at ? format(new Date(selectedEvidence.retrieved_at), 'MMM d, yyyy') : 'an earlier date'}.
+                            </p>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
+      )}
+
+      {/* Chat Panel */}
+      {isChatOpen && (
+          <div className="fixed inset-y-0 right-0 w-full md:w-[450px] bg-white shadow-2xl border-l border-gray-200 z-50 flex flex-col transform transition-transform">
+              <div className="flex justify-between items-center p-4 border-b border-gray-200 bg-gray-50">
+                  <div>
+                      <h2 className="font-bold text-gray-900">Ask Follow-ups</h2>
+                      <p className="text-xs text-gray-500">Legal information grounded in {jurisdictionData?.jurisdictions?.[0]?.name} law</p>
+                  </div>
+                  <button onClick={() => setIsChatOpen(false)} className="p-2 bg-gray-200 hover:bg-gray-300 rounded-full transition">
+                      <X className="h-4 w-4 text-gray-700" />
+                  </button>
+              </div>
+
+              <div className="p-3 border-b border-gray-100 flex gap-2 overflow-x-auto">
+                  {['Normal', 'Explain like I am 12', 'Summarize for my landlord'].map(t => (
+                      <button 
+                          key={t}
+                          onClick={() => setChatTone(t)}
+                          className={`whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium transition ${chatTone === t ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                      >
+                          {t}
+                      </button>
+                  ))}
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {chatHistory.map((msg, idx) => (
+                      <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-100 text-gray-800 rounded-bl-none'}`}>
+                              {msg.role === 'assistant' ? (
+                                  msg.content.split(/(\[doc_[a-zA-Z0-9-]+\])/).map((part, i) => {
+                                      const match = part.match(/\[(doc_[a-zA-Z0-9-]+)\]/);
+                                      if (match) {
+                                          const docId = match[1];
+                                          const doc = rawEvidence.find(e => e.documentId === docId);
+                                          return (
+                                              <button 
+                                                  key={i} 
+                                                  onClick={() => doc && setSelectedEvidence(doc)}
+                                                  className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 mx-1 bg-blue-100 text-blue-700 rounded border border-blue-200 hover:bg-blue-200 uppercase tracking-wide transition align-middle"
+                                              >
+                                                  {doc ? 'Source' : 'Source'}
+                                              </button>
+                                          );
+                                      }
+                                      return <span key={i}>{part}</span>;
+                                  })
+                              ) : (
+                                  msg.content
+                              )}
+                          </div>
+                      </div>
+                  ))}
+                  {isChatLoading && (
+                      <div className="flex justify-start">
+                          <div className="bg-gray-100 p-3 rounded-2xl rounded-bl-none"><Loader2 className="w-4 h-4 animate-spin text-gray-400" /></div>
+                      </div>
+                  )}
+              </div>
+
+              <form onSubmit={handleChatSubmit} className="p-4 border-t border-gray-200 bg-white">
+                  <div className="flex gap-2">
+                      <input 
+                          type="text"
+                          value={currentChatInput}
+                          onChange={(e) => setCurrentChatInput(e.target.value)}
+                          placeholder="Ask a follow-up..."
+                          className="flex-1 border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm text-gray-900"
+                      />
+                      <button type="submit" disabled={!currentChatInput.trim() || isChatLoading} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl transition">
+                          <ArrowRight className="w-5 h-5" />
+                      </button>
+                  </div>
+                  <p className="text-center text-[10px] text-gray-400 mt-2">Legal information, not legal advice.</p>
+              </form>
+          </div>
       )}
     </div>
   );

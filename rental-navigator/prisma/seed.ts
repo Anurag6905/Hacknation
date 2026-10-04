@@ -17,7 +17,7 @@ const TOPICS = [
 ];
 
 async function main() {
-  console.log('Seeding Database (Temporal Edition)...');
+  console.log('Seeding Database for Extensive Demos...');
 
   // 1. Seed Topics
   for (const topic of TOPICS) {
@@ -31,20 +31,31 @@ async function main() {
   const rentIncreaseTopic = await prisma.legalTopic.findUnique({ where: { name: 'rent_increase' } });
   const securityDepositTopic = await prisma.legalTopic.findUnique({ where: { name: 'security_deposit' } });
   const landlordEntryTopic = await prisma.legalTopic.findUnique({ where: { name: 'landlord_entry' } });
+  const evictionTopic = await prisma.legalTopic.findUnique({ where: { name: 'eviction' } });
 
   // 2. Seed Jurisdictions
-  const caState = await prisma.jurisdiction.findFirst({ where: { name: 'California' } }) || await prisma.jurisdiction.create({
-    data: { name: 'California', level: 'State' }
+  const caState = await prisma.jurisdiction.upsert({
+    where: { id: 'ca-state' },
+    update: {},
+    create: { id: 'ca-state', name: 'California', level: 'State' }
   });
 
-  const sfCity = await prisma.jurisdiction.findFirst({ where: { name: 'San Francisco' } }) || await prisma.jurisdiction.create({
-    data: { name: 'San Francisco', level: 'City' }
+  const sfCity = await prisma.jurisdiction.upsert({
+    where: { id: 'sf-city' },
+    update: {},
+    create: { id: 'sf-city', name: 'San Francisco', level: 'City' }
   });
 
-  // Wipe old docs to prevent duplicates
+  const sjCity = await prisma.jurisdiction.upsert({
+    where: { id: 'sj-city' },
+    update: {},
+    create: { id: 'sj-city', name: 'San Jose', level: 'City' }
+  });
+
+  // Wipe old docs
   await prisma.legalDocument.deleteMany({});
 
-  // Document 1 (REPEALED/PAST): Old CA Security Deposit
+  // --- CALIFORNIA (STATE) ---
   await prisma.legalDocument.create({
     data: {
       title: 'California Civil Code Section 1950.5 - Security Deposits (Pre-2024)',
@@ -54,13 +65,12 @@ async function main() {
       source_url: 'https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=CIV&sectionNum=1950.5.',
       authority_level: 'PRIMARY',
       effective_from: new Date('2000-01-01T00:00:00Z'),
-      effective_until: new Date('2024-06-30T23:59:59Z'), // Replaced by AB12
+      effective_until: new Date('2024-06-30T23:59:59Z'), 
       status: 'REPEALED',
       topics: { connect: [{ id: securityDepositTopic!.id }] }
     }
   });
 
-  // Document 2 (CURRENT): New CA Security Deposit (AB 12)
   await prisma.legalDocument.create({
     data: {
       title: 'California Civil Code Section 1950.5 - Security Deposits (AB 12)',
@@ -75,23 +85,21 @@ async function main() {
     }
   });
 
-  // Document 3 (CURRENT): Rent Increase Cap (AB 1482)
   await prisma.legalDocument.create({
     data: {
-      title: 'California Civil Code Section 1947.12 - Rent Limits',
+      title: 'California Civil Code Section 1947.12 - Rent Limits (AB 1482)',
       jurisdictionId: caState.id,
       jurisdictionLevel: 'State',
       text: `An owner of residential real property shall not increase the gross rental rate for a dwelling more than 5 percent plus the percentage change in the cost of living, or 10 percent, whichever is lower.`,
       source_url: 'https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=CIV&sectionNum=1947.12.',
       authority_level: 'PRIMARY',
       effective_from: new Date('2020-01-01T00:00:00Z'),
-      effective_until: new Date('2026-12-31T23:59:59Z'), // Arbitrary future repeal date for demo
+      effective_until: new Date('2026-12-31T23:59:59Z'), 
       status: 'CURRENT',
       topics: { connect: [{ id: rentIncreaseTopic!.id }] }
     }
   });
 
-  // Document 4 (FUTURE): Strict Rent Increase Cap (Hypothetical SB X)
   await prisma.legalDocument.create({
     data: {
       title: 'California Civil Code Section 1947.12 - Strict Rent Limits (SB X)',
@@ -106,7 +114,6 @@ async function main() {
     }
   });
 
-  // Document 5 (PENDING): Proposed Eviction Freeze
   await prisma.legalDocument.create({
     data: {
       title: 'Proposed Assembly Bill 999 - Winter Eviction Freeze',
@@ -115,20 +122,57 @@ async function main() {
       text: `A landlord shall not terminate a tenancy or file an unlawful detainer action against a tenant during the months of December, January, and February, regardless of fault.`,
       source_url: 'https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=CIV&sectionNum=1946.2.',
       authority_level: 'PRIMARY',
-      effective_from: new Date('2028-01-01T00:00:00Z'), // Won't apply yet because pending
+      effective_from: new Date('2028-01-01T00:00:00Z'), 
       status: 'PENDING',
-      topics: { connect: [{ id: rentIncreaseTopic!.id }] } // actually should be eviction but sticking to rent increase for demo or whatever
+      topics: { connect: [{ id: evictionTopic!.id }] }
     }
   });
 
-  console.log('Seeding Complete! Seeded verified state and local laws with temporal variants.');
+  await prisma.legalDocument.create({
+    data: {
+      title: 'California Civil Code Section 1954 - Landlord Entry',
+      jurisdictionId: caState.id,
+      jurisdictionLevel: 'State',
+      text: `A landlord may enter the dwelling unit only in the following cases: In case of emergency, to make necessary repairs, or to exhibit the unit to prospective tenants. The landlord shall give the tenant reasonable notice in writing of their intent to enter. Twenty-four hours shall be presumed to be reasonable notice.`,
+      source_url: 'https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=CIV&sectionNum=1954.',
+      authority_level: 'PRIMARY',
+      effective_from: new Date('1975-01-01T00:00:00Z'),
+      status: 'CURRENT',
+      topics: { connect: [{ id: landlordEntryTopic!.id }] }
+    }
+  });
+
+  // --- SAN FRANCISCO (CITY) ---
+  await prisma.legalDocument.create({
+    data: {
+      title: 'San Francisco Administrative Code Section 37.3 - Rent Limitations',
+      jurisdictionId: sfCity.id,
+      jurisdictionLevel: 'City',
+      text: `Landlords may impose annual rent increases which shall not exceed 60% of the percentage increase in the Consumer Price Index for All Urban Consumers in the San Francisco-Oakland-San Jose region.`,
+      source_url: 'https://codelibrary.amlegal.com/codes/san_francisco/latest/sf_admin/0-0-0-15555',
+      authority_level: 'PRIMARY',
+      effective_from: new Date('1979-06-13T00:00:00Z'),
+      status: 'CURRENT',
+      topics: { connect: [{ id: rentIncreaseTopic!.id }] }
+    }
+  });
+
+  // --- SAN JOSE (CITY) ---
+  await prisma.legalDocument.create({
+    data: {
+      title: 'San Jose Municipal Code Section 17.23.310 - Allowable Rent Increases',
+      jurisdictionId: sjCity.id,
+      jurisdictionLevel: 'City',
+      text: `A landlord may not increase the rent of any rent-stabilized unit by more than five percent (5%) in any twelve-month period.`,
+      source_url: 'https://library.municode.com/ca/san_jose/codes/code_of_ordinances',
+      authority_level: 'PRIMARY',
+      effective_from: new Date('2017-01-01T00:00:00Z'),
+      status: 'CURRENT',
+      topics: { connect: [{ id: rentIncreaseTopic!.id }] }
+    }
+  });
+
+  console.log('Seeding Complete! Added robust CA, SF, and SJ local laws.');
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+main().catch(console.error).finally(() => prisma.$disconnect());

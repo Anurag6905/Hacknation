@@ -49,11 +49,17 @@ export async function POST(request: Request) {
         tDate
     );
 
+    const validClaims = validationResult.validatedClaims.filter((c: any) => c.isValid);
+    
     // Filter out completely invalid claims, or mark them so the UI can display warnings
     const finalAnswer = {
         ...rawAnswer,
-        claims: validationResult.validatedClaims
+        claims: validClaims
     };
+
+    if (validClaims.length === 0 && rawAnswer.claims?.length > 0) {
+        finalAnswer.shortAnswer = "I couldn't find sufficient authoritative evidence to answer this reliably.";
+    }
 
     return NextResponse.json({
         answer: finalAnswer,
