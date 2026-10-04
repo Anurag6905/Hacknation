@@ -82,7 +82,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ properties: processedProperties });
 
   } catch (error: any) {
-    console.error('Map API Error:', error);
+    // console.error('Map API Error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

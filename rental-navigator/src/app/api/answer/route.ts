@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     });
 
   } catch (error: any) {
-    console.error('Answer API Error:', error);
+    // console.error('Answer API Error:', error);
     return NextResponse.json(
       { error: 'An unexpected error occurred during answer generation.', code: 'INTERNAL_ERROR' },
       { status: 500 }

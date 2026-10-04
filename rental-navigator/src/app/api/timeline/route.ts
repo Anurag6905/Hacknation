@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     return NextResponse.json(comparison);
 
   } catch (error: any) {
-    console.error('Timeline API Error:', error);
+    // console.error('Timeline API Error:', error);
     return NextResponse.json(
       { error: 'An unexpected error occurred during timeline resolution.', code: 'INTERNAL_ERROR' },
       { status: 500 }

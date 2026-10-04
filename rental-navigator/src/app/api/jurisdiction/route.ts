@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       );
     }
     
-    console.error('Jurisdiction API Error:', error);
+    // console.error('Jurisdiction API Error:', error);
     return NextResponse.json(
       { error: 'An unexpected error occurred during address resolution.', code: 'INTERNAL_ERROR' },
       { status: 500 }

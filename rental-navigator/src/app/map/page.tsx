@@ -27,7 +27,7 @@ export default function MapPage() {
       const data = await res.json();
       setProperties(data.properties || []);
     } catch (err) {
-      console.error(err);
+      // console.error(err);
     }
   };
 

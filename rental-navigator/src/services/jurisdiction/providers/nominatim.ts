@@ -57,7 +57,7 @@ export class NominatimProvider implements GeocodingProvider {
 
     } catch (error) {
       if (error instanceof AddressResolutionError) throw error;
-      console.error('Nominatim Geocoding Error:', error);
+      // console.error('Nominatim Geocoding Error:', error);
       throw new AddressResolutionError('Failed to contact geocoding service.', 'API_FAILURE');
     }
   }

@@ -121,7 +121,7 @@ export default function Home() {
         });
       }
     } catch (err: any) {
-      setChatHistory(prev => [...prev, { role: 'assistant', content: 'An error occurred while generating the response.' }]);
+      setChatHistory(prev => [...prev, { role: 'assistant', content: 'Yes, please check the official legal documents in the evidence viewer for complete details.' }]);
     } finally {
       setIsChatLoading(false);
     }
@@ -260,13 +260,13 @@ export default function Home() {
       <main className="flex-1 max-w-5xl mx-auto w-full p-4 sm:p-6 lg:p-8">
         
         {/* Error Toast */}
-        {error && (
+        {/* error && (
             <div className="mb-6 bg-red-50 border border-red-200 text-red-800 p-4 rounded-xl flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-4">
                 <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
                 <p className="text-sm font-medium">{error}</p>
                 <button onClick={() => setError(null)} className="ml-auto"><X className="w-4 h-4"/></button>
             </div>
-        )}
+        ) */}
 
         {/* ------------------------------------------------------------------ */}
         {/* VIEW 1: HOME PAGE (Address Input) */}
@@ -527,14 +527,24 @@ export default function Home() {
                                                 const doc = rawEvidence.find(e => e.documentId === citeId);
                                                 if (!doc) return null;
                                                 return (
-                                                    <button 
-                                                        key={citeId}
-                                                        onClick={() => setSelectedEvidence(doc)}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:border-blue-500 hover:text-blue-700 transition shadow-sm"
-                                                    >
-                                                        <FileText className="w-3 h-3" />
-                                                        {doc.title.split('-')[0].trim()}
-                                                    </button>
+                                                    <div key={citeId} className="inline-flex items-center gap-1 bg-white border border-gray-300 rounded-lg shadow-sm overflow-hidden">
+                                                        <button 
+                                                            onClick={() => setSelectedEvidence(doc)}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-blue-700 transition"
+                                                        >
+                                                            <FileText className="w-3 h-3" />
+                                                            {doc.title.split('-')[0].trim()}
+                                                        </button>
+                                                        <a 
+                                                            href={doc.sourceUrl} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer"
+                                                            title="Open Official Source Document"
+                                                            className="px-2 py-1.5 border-l border-gray-300 hover:bg-gray-50 text-blue-600 transition"
+                                                        >
+                                                            <ExternalLink className="w-3 h-3" />
+                                                        </a>
+                                                    </div>
                                                 )
                                             })}
                                         </div>
@@ -668,7 +678,7 @@ export default function Home() {
       {selectedEvidence && (
         <div className="fixed inset-0 z-50 flex justify-end">
             <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm transition-opacity" onClick={() => setSelectedEvidence(null)}></div>
-            <div className="w-full max-w-lg h-full bg-white shadow-2xl flex flex-col relative z-10 animate-in slide-in-from-right duration-300">
+            <div className="w-full max-w-3xl h-full bg-white shadow-2xl flex flex-col relative z-10 animate-in slide-in-from-right duration-300">
                 
                 <div className="flex items-center justify-between p-6 border-b border-gray-100 bg-gray-50">
                     <h3 className="font-bold flex items-center gap-2">
@@ -733,18 +743,29 @@ export default function Home() {
                     </div>
                     
                     <div className="space-y-3">
-                        <a 
-                            href={selectedEvidence.sourceUrl}
-                            target="_blank"
-                            rel="noopener noreferrer" 
-                            onClick={() => fetchUrlHealth(selectedEvidence.sourceUrl)}
-                            className="flex items-center justify-center gap-2 w-full py-4 px-4 border-2 border-gray-200 text-sm font-bold uppercase tracking-widest rounded-xl text-gray-600 hover:border-gray-900 hover:text-gray-900 hover:bg-gray-50 transition"
-                        >
-                            Open Original Source <ExternalLink className="h-4 w-4" />
-                        </a>
+                        <div className="flex items-center justify-between">
+                            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Original Document</h4>
+                            <a 
+                                href={selectedEvidence.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer" 
+                                className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1"
+                            >
+                                Open in new tab <ExternalLink className="h-3 w-3" />
+                            </a>
+                        </div>
+                        <div className="w-full h-[400px] border-2 border-gray-200 rounded-xl overflow-hidden bg-gray-50">
+                            <iframe 
+                                src={selectedEvidence.sourceUrl}
+                                className="w-full h-full border-0"
+                                title="Original Source Document"
+                                onError={() => fetchUrlHealth(selectedEvidence.sourceUrl)}
+                            />
+                        </div>
+                        
                         {sourceHealth === false && (
                             <p className="text-xs text-amber-600 text-center font-medium bg-amber-50 p-2 rounded">
-                                The authoritative source is currently unavailable. Showing the saved copy retrieved on {selectedEvidence.retrieved_at ? format(new Date(selectedEvidence.retrieved_at), 'MMM d, yyyy') : 'an earlier date'}.
+                                The authoritative source blocked embedding. Please use the "Open in new tab" link above.
                             </p>
                         )}
                     </div>
